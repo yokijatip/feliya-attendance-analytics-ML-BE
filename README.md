@@ -149,6 +149,20 @@ Setelah menjalankan aplikasi, akses dokumentasi API di:
 
 - `POST /api/v1/ml/clustering/analyze` - Perform clustering analysis
 - `GET /api/v1/ml/clustering/quick-analysis` - Quick clustering analysis
+- `GET /api/v1/ml/clustering/monthly-analysis` - Monthly clustering analysis
+  - **Parameters**:
+    - `year` (optional): Year (default: current year)
+    - `month` (optional): Month 1-12 (default: current month)
+    - `n_clusters` (optional): Number of clusters (default: 3)
+- `GET /api/v1/ml/clustering/quarterly-analysis` - Quarterly clustering analysis
+  - **Parameters**:
+    - `year` (optional): Year (default: current year)
+    - `quarter` (optional): Quarter 1-4 (default: current quarter)
+    - `n_clusters` (optional): Number of clusters (default: 3)
+- `GET /api/v1/ml/clustering/yearly-analysis` - Yearly clustering analysis
+  - **Parameters**:
+    - `year` (optional): Year (default: current year)
+    - `n_clusters` (optional): Number of clusters (default: 3)
 - `GET /api/v1/ml/clustering/user/{user_id}/predict` - Predict user cluster
 - `GET /api/v1/ml/performance/{user_id}/metrics` - Get performance metrics
 - `GET /api/v1/ml/performance/{user_id}/insights` - Get AI insights

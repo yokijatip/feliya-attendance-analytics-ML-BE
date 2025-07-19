@@ -59,7 +59,7 @@ class MLService:
     async def run_startup_analysis(self):
         """Run clustering analysis on startup and display results"""
         try:
-            print("\n🤖 Running automatic clustering analysis...")
+            print("\n🤖 Running automatic clustering analysis (All Time Data)...")
             
             # Check if we have users and attendance data
             users = await firebase_service.get_users_by_role("worker")
@@ -68,7 +68,10 @@ class MLService:
                 return
             
             # Perform clustering analysis
-            result = await self.perform_clustering()
+            result = await self.perform_clustering(
+                date_from=None,  # All time data
+                date_to=None
+            )
             
             # Display results
             self.display_clustering_results(result)
@@ -78,6 +81,85 @@ class MLService:
             
         except Exception as e:
             print(f"⚠️ Could not run startup analysis: {e}")
+    
+    async def run_monthly_analysis(self, year: int = None, month: int = None):
+        """Run clustering analysis for specific month"""
+        from datetime import datetime, timedelta
+        import calendar
+        
+        if not year or not month:
+            now = datetime.now()
+            year = now.year
+            month = now.month
+        
+        # Get first and last day of month
+        first_day = datetime(year, month, 1)
+        last_day = datetime(year, month, calendar.monthrange(year, month)[1])
+        
+        date_from = first_day.strftime('%Y-%m-%d')
+        date_to = last_day.strftime('%Y-%m-%d')
+        
+        print(f"\n🗓️ Running monthly clustering analysis for {calendar.month_name[month]} {year}...")
+        
+        try:
+            result = await self.perform_clustering(
+                date_from=date_from,
+                date_to=date_to
+            )
+            
+            print(f"\n📅 MONTHLY ANALYSIS - {calendar.month_name[month]} {year}")
+            print("="*60)
+            self.display_clustering_results(result)
+            
+            return result
+            
+        except Exception as e:
+            print(f"⚠️ Could not run monthly analysis: {e}")
+            return None
+    
+    async def run_quarterly_analysis(self, year: int = None, quarter: int = None):
+        """Run clustering analysis for specific quarter"""
+        from datetime import datetime
+        import calendar
+        
+        if not year or not quarter:
+            now = datetime.now()
+            year = now.year
+            quarter = (now.month - 1) // 3 + 1
+        
+        # Define quarter months
+        quarter_months = {
+            1: (1, 3),   # Q1: Jan-Mar
+            2: (4, 6),   # Q2: Apr-Jun
+            3: (7, 9),   # Q3: Jul-Sep
+            4: (10, 12)  # Q4: Oct-Dec
+        }
+        
+        start_month, end_month = quarter_months[quarter]
+        
+        first_day = datetime(year, start_month, 1)
+        last_day = datetime(year, end_month, calendar.monthrange(year, end_month)[1])
+        
+        date_from = first_day.strftime('%Y-%m-%d')
+        date_to = last_day.strftime('%Y-%m-%d')
+        
+        print(f"\n📊 Running quarterly clustering analysis for Q{quarter} {year}...")
+        
+        try:
+            result = await self.perform_clustering(
+                date_from=date_from,
+                date_to=date_to
+            )
+            
+            print(f"\n📈 QUARTERLY ANALYSIS - Q{quarter} {year}")
+            print("="*60)
+            self.display_clustering_results(result)
+            
+            return result
+            
+        except Exception as e:
+            print(f"⚠️ Could not run quarterly analysis: {e}")
+            return None
     
     def display_clustering_results(self, result: ClusteringResponse):
         """Display clustering results in console"""

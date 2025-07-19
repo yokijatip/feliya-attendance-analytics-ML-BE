@@ -17,9 +17,23 @@ async def lifespan(app: FastAPI):
     firebase_service.initialize()
     await ml_service.initialize()
     
+    # Run different types of analysis
+    print("\n" + "="*60)
+    print("📊 RUNNING MULTIPLE ANALYSIS PERIODS")
+    print("="*60)
+    
+    # 1. All-time analysis (default)
+    await ml_service.run_startup_analysis()
+    
+    # 2. Current month analysis
+    await ml_service.run_monthly_analysis()
+    
+    # 3. Current quarter analysis  
+    await ml_service.run_quarterly_analysis()
+    
     print("\n✅ All services initialized successfully!")
     print("🌐 API is ready to serve requests")
-    print("📊 Clustering analysis completed")
+    print("📊 All clustering analyses completed")
     print("="*50)
     
     yield

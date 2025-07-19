@@ -46,6 +46,123 @@ async def quick_clustering_analysis(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error performing quick analysis: {str(e)}")
 
+@router.get("/clustering/monthly-analysis", response_model=ClusteringResponse)
+async def monthly_clustering_analysis(
+    year: Optional[int] = Query(None, description="Year (default: current year)"),
+    month: Optional[int] = Query(None, description="Month 1-12 (default: current month)"),
+    n_clusters: Optional[int] = Query(3)
+):
+    """Perform clustering analysis for specific month"""
+    try:
+        from datetime import datetime
+        import calendar
+        
+        if not year or not month:
+            now = datetime.now()
+            year = year or now.year
+            month = month or now.month
+        
+        # Validate month
+        if month < 1 or month > 12:
+            raise HTTPException(status_code=400, detail="Month must be between 1-12")
+        
+        # Get first and last day of month
+        first_day = datetime(year, month, 1)
+        last_day = datetime(year, month, calendar.monthrange(year, month)[1])
+        
+        date_from = first_day.strftime('%Y-%m-%d')
+        date_to = last_day.strftime('%Y-%m-%d')
+        
+        result = await ml_service.perform_clustering(
+            user_ids=None,
+            date_from=date_from,
+            date_to=date_to,
+            n_clusters=n_clusters
+        )
+        
+        return result
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error performing monthly analysis: {str(e)}")
+
+@router.get("/clustering/quarterly-analysis", response_model=ClusteringResponse)
+async def quarterly_clustering_analysis(
+    year: Optional[int] = Query(None, description="Year (default: current year)"),
+    quarter: Optional[int] = Query(None, description="Quarter 1-4 (default: current quarter)"),
+    n_clusters: Optional[int] = Query(3)
+):
+    """Perform clustering analysis for specific quarter"""
+    try:
+        from datetime import datetime
+        import calendar
+        
+        if not year or not quarter:
+            now = datetime.now()
+            year = year or now.year
+            quarter = quarter or ((now.month - 1) // 3 + 1)
+        
+        # Validate quarter
+        if quarter < 1 or quarter > 4:
+            raise HTTPException(status_code=400, detail="Quarter must be between 1-4")
+        
+        # Define quarter months
+        quarter_months = {
+            1: (1, 3),   # Q1: Jan-Mar
+            2: (4, 6),   # Q2: Apr-Jun
+            3: (7, 9),   # Q3: Jul-Sep
+            4: (10, 12)  # Q4: Oct-Dec
+        }
+        
+        start_month, end_month = quarter_months[quarter]
+        
+        first_day = datetime(year, start_month, 1)
+        last_day = datetime(year, end_month, calendar.monthrange(year, end_month)[1])
+        
+        date_from = first_day.strftime('%Y-%m-%d')
+        date_to = last_day.strftime('%Y-%m-%d')
+        
+        result = await ml_service.perform_clustering(
+            user_ids=None,
+            date_from=date_from,
+            date_to=date_to,
+            n_clusters=n_clusters
+        )
+        
+        return result
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error performing quarterly analysis: {str(e)}")
+
+@router.get("/clustering/yearly-analysis", response_model=ClusteringResponse)
+async def yearly_clustering_analysis(
+    year: Optional[int] = Query(None, description="Year (default: current year)"),
+    n_clusters: Optional[int] = Query(3)
+):
+    """Perform clustering analysis for specific year"""
+    try:
+        from datetime import datetime
+        
+        if not year:
+            year = datetime.now().year
+        
+        date_from = f"{year}-01-01"
+        date_to = f"{year}-12-31"
+        
+        result = await ml_service.perform_clustering(
+            user_ids=None,
+            date_from=date_from,
+            date_to=date_to,
+            n_clusters=n_clusters
+        )
+        
+        return result
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error performing yearly analysis: {str(e)}")
 @router.get("/clustering/user/{user_id}/predict")
 async def predict_user_cluster(user_id: str):
     """Predict cluster for a specific user using trained model"""
