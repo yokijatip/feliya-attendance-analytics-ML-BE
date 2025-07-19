@@ -1,0 +1,10 @@
+# This directory will contain Firebase credentials
+# Add your firebase-credentials.json file here
+# DO NOT commit the actual credentials file to version control
+
+# Instructions:
+# 1. Go to Firebase Console > Project Settings > Service Accounts
+# 2. Generate new private key
+# 3. Download the JSON file
+# 4. Rename it to 'firebase-credentials.json'
+# 5. Place it in this config/ directory
