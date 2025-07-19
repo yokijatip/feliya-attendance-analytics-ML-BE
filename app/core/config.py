@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     FIREBASE_PROJECT_ID: str = ""
     
     # API Configuration
-    API_HOST: str = "0.0.0.0"
+    API_HOST: str = "localhost"
     API_PORT: int = 8000
     DEBUG: bool = True
     
