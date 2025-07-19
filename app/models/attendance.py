@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Any
+from pydantic import field_validator
 
 class AttendanceBase(BaseModel):
     attendance_id: str = Field(alias="attendanceId")
@@ -36,6 +37,16 @@ class AttendanceUpdate(BaseModel):
 
 class AttendanceResponse(AttendanceBase):
     id: str
+    
+    @field_validator('clock_in_time', 'clock_out_time', mode='before')
+    @classmethod
+    def validate_time_fields(cls, v):
+        """Handle Firebase datetime fields"""
+        if hasattr(v, 'isoformat'):
+            return v.isoformat()
+        elif hasattr(v, 'strftime'):
+            return v.strftime('%H:%M')
+        return str(v) if v else None
 
 class AttendanceAnalytics(BaseModel):
     user_id: str

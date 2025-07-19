@@ -50,6 +50,14 @@ class FirebaseService:
             for doc in docs:
                 doc_data = doc.to_dict()
                 doc_data['id'] = doc.id
+                
+                # Convert Firebase datetime objects to strings
+                for key, value in doc_data.items():
+                    if hasattr(value, 'isoformat'):
+                        doc_data[key] = value.isoformat()
+                    elif hasattr(value, 'strftime'):
+                        doc_data[key] = value.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+                
                 result.append(doc_data)
             return result
         except Exception as e:
@@ -63,6 +71,14 @@ class FirebaseService:
             if doc.exists:
                 doc_data = doc.to_dict()
                 doc_data['id'] = doc.id
+                
+                # Convert Firebase datetime objects to strings
+                for key, value in doc_data.items():
+                    if hasattr(value, 'isoformat'):
+                        doc_data[key] = value.isoformat()
+                    elif hasattr(value, 'strftime'):
+                        doc_data[key] = value.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+                
                 return doc_data
             return None
         except Exception as e:
@@ -122,6 +138,14 @@ class FirebaseService:
             for doc in docs:
                 doc_data = doc.to_dict()
                 doc_data['id'] = doc.id
+                
+                # Convert Firebase datetime objects to strings
+                for key, value in doc_data.items():
+                    if hasattr(value, 'isoformat'):
+                        doc_data[key] = value.isoformat()
+                    elif hasattr(value, 'strftime'):
+                        doc_data[key] = value.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+                
                 result.append(doc_data)
             
             return result

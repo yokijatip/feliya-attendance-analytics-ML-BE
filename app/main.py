@@ -10,17 +10,23 @@ from app.services.ml_service import ml_service
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    print("🚀 Initializing Employee Performance Analytics API...")
+    print("\n🚀 EMPLOYEE PERFORMANCE ANALYTICS API")
+    print("="*50)
+    print("🔥 Initializing services...")
     
     firebase_service.initialize()
     await ml_service.initialize()
     
-    print("✅ All services initialized successfully!")
+    print("\n✅ All services initialized successfully!")
+    print("🌐 API is ready to serve requests")
+    print("📊 Clustering analysis completed")
+    print("="*50)
     
     yield
     
     # Shutdown
-    print("🔄 Shutting down services...")
+    print("\n🔄 Shutting down services...")
+    print("👋 Goodbye!")
 
 app = FastAPI(
     title="Employee Performance Analytics API",

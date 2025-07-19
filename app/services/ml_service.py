@@ -6,6 +6,8 @@ from sklearn.metrics import silhouette_score
 from datetime import datetime, timedelta
 import joblib
 import os
+import matplotlib.pyplot as plt
+import seaborn as sns
 from typing import List, Dict, Tuple, Optional
 
 from app.services.firebase_service import firebase_service
@@ -47,10 +49,135 @@ class MLService:
                 print("✅ ML models loaded successfully")
             else:
                 print("ℹ️ No existing models found. Will train new models when needed.")
+            
+            # Run automatic clustering analysis on startup
+            await self.run_startup_analysis()
                 
         except Exception as e:
             print(f"❌ Error initializing ML service: {e}")
 
+    async def run_startup_analysis(self):
+        """Run clustering analysis on startup and display results"""
+        try:
+            print("\n🤖 Running automatic clustering analysis...")
+            
+            # Check if we have users and attendance data
+            users = await firebase_service.get_users_by_role("worker")
+            if not users:
+                print("⚠️ No worker users found. Skipping clustering analysis.")
+                return
+            
+            # Perform clustering analysis
+            result = await self.perform_clustering()
+            
+            # Display results
+            self.display_clustering_results(result)
+            
+            # Create visualizations
+            self.create_visualizations(result)
+            
+        except Exception as e:
+            print(f"⚠️ Could not run startup analysis: {e}")
+    
+    def display_clustering_results(self, result: ClusteringResponse):
+        """Display clustering results in console"""
+        print("\n" + "="*60)
+        print("🎯 CLUSTERING ANALYSIS RESULTS")
+        print("="*60)
+        
+        print(f"📊 Total Users Analyzed: {result.total_users}")
+        print(f"🎯 Model Accuracy (Silhouette Score): {result.model_accuracy:.3f}")
+        print(f"📅 Analysis Period: {result.analysis_period['date_from']} to {result.analysis_period['date_to']}")
+        
+        # Group results by cluster
+        clusters = {}
+        for user_result in result.results:
+            cluster_label = user_result.cluster_label
+            if cluster_label not in clusters:
+                clusters[cluster_label] = []
+            clusters[cluster_label].append(user_result)
+        
+        print(f"\n📈 CLUSTER DISTRIBUTION:")
+        for cluster_label, users in clusters.items():
+            print(f"  {cluster_label}: {len(users)} users ({len(users)/result.total_users*100:.1f}%)")
+        
+        print(f"\n👥 DETAILED RESULTS:")
+        for cluster_label, users in clusters.items():
+            print(f"\n🏷️ {cluster_label}:")
+            for user in sorted(users, key=lambda x: x.performance_score, reverse=True):
+                print(f"  • {user.name} ({user.worker_id}) - Score: {user.performance_score:.1f}")
+                print(f"    Attendance: {user.features.get('attendance_rate', 0):.1f}% | "
+                      f"Punctuality: {user.features.get('punctuality_score', 0):.1f}% | "
+                      f"Productivity: {user.features.get('productivity_score', 0):.1f}%")
+        
+        print("\n" + "="*60)
+    
+    def create_visualizations(self, result: ClusteringResponse):
+        """Create and save visualizations"""
+        try:
+            # Set style
+            plt.style.use('seaborn-v0_8')
+            sns.set_palette("husl")
+            
+            # Create figure with subplots
+            fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+            fig.suptitle('Employee Performance Clustering Analysis', fontsize=16, fontweight='bold')
+            
+            # Prepare data
+            df_results = pd.DataFrame([
+                {
+                    'name': r.name,
+                    'cluster': r.cluster_label,
+                    'performance_score': r.performance_score,
+                    **r.features
+                }
+                for r in result.results
+            ])
+            
+            # 1. Cluster Distribution (Pie Chart)
+            cluster_counts = df_results['cluster'].value_counts()
+            axes[0, 0].pie(cluster_counts.values, labels=cluster_counts.index, autopct='%1.1f%%')
+            axes[0, 0].set_title('Cluster Distribution')
+            
+            # 2. Performance Score by Cluster (Box Plot)
+            sns.boxplot(data=df_results, x='cluster', y='performance_score', ax=axes[0, 1])
+            axes[0, 1].set_title('Performance Score by Cluster')
+            axes[0, 1].tick_params(axis='x', rotation=45)
+            
+            # 3. Attendance vs Productivity Scatter
+            scatter = axes[1, 0].scatter(
+                df_results['attendance_rate'], 
+                df_results['productivity_score'],
+                c=df_results['cluster'].astype('category').cat.codes,
+                alpha=0.7,
+                s=100
+            )
+            axes[1, 0].set_xlabel('Attendance Rate (%)')
+            axes[1, 0].set_ylabel('Productivity Score')
+            axes[1, 0].set_title('Attendance vs Productivity')
+            
+            # 4. Feature Comparison (Radar Chart alternative - Heatmap)
+            feature_cols = ['attendance_rate', 'punctuality_score', 'productivity_score', 'consistency_score']
+            cluster_means = df_results.groupby('cluster')[feature_cols].mean()
+            
+            sns.heatmap(cluster_means.T, annot=True, fmt='.1f', cmap='RdYlGn', ax=axes[1, 1])
+            axes[1, 1].set_title('Average Features by Cluster')
+            axes[1, 1].set_xlabel('Cluster')
+            axes[1, 1].set_ylabel('Features')
+            
+            plt.tight_layout()
+            
+            # Save visualization
+            viz_path = os.path.join(settings.ML_MODEL_PATH, "clustering_analysis.png")
+            plt.savefig(viz_path, dpi=300, bbox_inches='tight')
+            print(f"📊 Visualization saved to: {viz_path}")
+            
+            # Show plot (if running interactively)
+            # plt.show()
+            plt.close()
+            
+        except Exception as e:
+            print(f"⚠️ Could not create visualizations: {e}")
     def save_models(self):
         """Save trained models to disk"""
         try:
