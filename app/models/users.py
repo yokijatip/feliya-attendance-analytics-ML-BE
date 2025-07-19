@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Any
+from pydantic import field_validator
 
 class UserBase(BaseModel):
     email: str
@@ -22,7 +23,17 @@ class UserUpdate(BaseModel):
 
 class UserResponse(UserBase):
     id: str
-    created: str
+    created: Any
+    
+    @field_validator('created')
+    @classmethod
+    def validate_created(cls, v):
+        """Convert Firebase DatetimeWithNanoseconds to string"""
+        if hasattr(v, 'isoformat'):
+            return v.isoformat()
+        elif hasattr(v, 'strftime'):
+            return v.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+        return str(v)
 
 class UserPerformance(BaseModel):
     user_id: str
