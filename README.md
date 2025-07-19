@@ -127,9 +127,23 @@ Setelah menjalankan aplikasi, akses dokumentasi API di:
 ### Analytics
 
 - `GET /api/v1/analytics/overview` - Get analytics overview
+  - **Parameters**:
+    - `date_from` (optional): Start date filter (format: YYYY-MM-DD)
+    - `date_to` (optional): End date filter (format: YYYY-MM-DD)
 - `GET /api/v1/analytics/team/performance` - Get team performance
+  - **Parameters**:
+    - `date_from` (optional): Start date filter (format: YYYY-MM-DD)
+    - `date_to` (optional): End date filter (format: YYYY-MM-DD)
+    - `role` (optional): User role filter (default: "worker")
 - `GET /api/v1/analytics/productivity/ranking` - Get productivity ranking
+  - **Parameters**:
+    - `date_from` (optional): Start date filter (format: YYYY-MM-DD)
+    - `date_to` (optional): End date filter (format: YYYY-MM-DD)
+    - `limit` (optional): Number of results (default: 10)
 - `GET /api/v1/analytics/trends/daily` - Get daily trends
+  - **Parameters**:
+    - `date_from` (optional): Start date filter (format: YYYY-MM-DD)
+    - `date_to` (optional): End date filter (format: YYYY-MM-DD)
 
 ### Machine Learning
 
