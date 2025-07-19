@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     
     # Performance Analysis Settings
     WORKING_HOURS_TARGET: int = 8
-    PUNCTUALITY_TIME_THRESHOLD: str = "09:00"
+    PUNCTUALITY_TIME_THRESHOLD: str = "08:00"  # Consider punctual if clock in before 08:15
     
     @property
     def allowed_origins_list(self) -> List[str]:

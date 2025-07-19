@@ -28,9 +28,9 @@ class MLService:
             'productivity_score'
         ]
         self.cluster_labels = {
-            0: "High Performer",
+            0: "Needs Improvement",
             1: "Average Performer", 
-            2: "Needs Improvement"
+            2: "High Performer"
         }
 
     async def initialize(self):
@@ -102,7 +102,12 @@ class MLService:
             print(f"  {cluster_label}: {len(users)} users ({len(users)/result.total_users*100:.1f}%)")
         
         print(f"\n👥 DETAILED RESULTS:")
-        for cluster_label, users in clusters.items():
+        # Display in order: High Performer, Average Performer, Needs Improvement
+        display_order = ["High Performer", "Average Performer", "Needs Improvement"]
+        for cluster_label in display_order:
+            if cluster_label not in clusters:
+                continue
+            users = clusters[cluster_label]
             print(f"\n🏷️ {cluster_label}:")
             for user in sorted(users, key=lambda x: x.performance_score, reverse=True):
                 print(f"  • {user.name} ({user.worker_id}) - Score: {user.performance_score:.1f}")
@@ -275,13 +280,34 @@ class MLService:
     def _calculate_punctuality_score(self, df: pd.DataFrame) -> float:
         """Calculate punctuality score based on clock-in times"""
         try:
-            target_time = settings.PUNCTUALITY_TIME_THRESHOLD
+            # Convert target time to minutes for comparison
+            target_hour, target_minute = map(int, settings.PUNCTUALITY_TIME_THRESHOLD.split(':'))
+            target_minutes = target_hour * 60 + target_minute
             
             punctual_days = 0
             for _, row in df.iterrows():
-                clock_in = row.get('clockInTime', '')
-                if clock_in and clock_in <= target_time:
-                    punctual_days += 1
+                clock_in_str = str(row.get('clockInTime', ''))
+                
+                # Handle different time formats
+                if clock_in_str and clock_in_str != 'nan':
+                    try:
+                        # Extract time from various formats
+                        if 'T' in clock_in_str:  # ISO format
+                            time_part = clock_in_str.split('T')[1].split('+')[0]
+                            hour, minute = map(int, time_part.split(':')[:2])
+                        elif ':' in clock_in_str:  # HH:MM format
+                            hour, minute = map(int, clock_in_str.split(':')[:2])
+                        else:
+                            continue
+                        
+                        clock_in_minutes = hour * 60 + minute
+                        
+                        # Consider punctual if within 15 minutes of target
+                        if clock_in_minutes <= target_minutes + 15:
+                            punctual_days += 1
+                            
+                    except (ValueError, IndexError):
+                        continue
             
             return (punctual_days / len(df)) * 100 if len(df) > 0 else 0
         except:
@@ -379,6 +405,24 @@ class MLService:
         self.kmeans_model = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
         clusters = self.kmeans_model.fit_predict(X_scaled)
         
+        # Sort clusters by performance (assign labels based on cluster centers)
+        cluster_performance = {}
+        for i in range(n_clusters):
+            cluster_mask = clusters == i
+            if np.any(cluster_mask):
+                cluster_users = df[cluster_mask]
+                avg_performance = cluster_users[feature_columns].mean().mean()
+                cluster_performance[i] = avg_performance
+        
+        # Sort clusters by performance and reassign labels
+        sorted_clusters = sorted(cluster_performance.items(), key=lambda x: x[1])
+        cluster_mapping = {}
+        for new_label, (old_label, _) in enumerate(sorted_clusters):
+            cluster_mapping[old_label] = new_label
+        
+        # Remap clusters
+        clusters = np.array([cluster_mapping[c] for c in clusters])
+        
         # Calculate silhouette score for model evaluation
         if len(set(clusters)) > 1:
             silhouette_avg = silhouette_score(X_scaled, clusters)
@@ -408,6 +452,9 @@ class MLService:
                 features={col: user_data[col] for col in feature_columns}
             )
             results.append(result)
+        
+        # Sort results by cluster and then by performance score
+        results.sort(key=lambda x: (x.cluster, -x.performance_score))
 
         # Get cluster centers
         cluster_centers = {}
