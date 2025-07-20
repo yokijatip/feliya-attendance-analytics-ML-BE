@@ -38,7 +38,8 @@ class MLService:
         self.cluster_labels = {
             0: "Needs Improvement",
             1: "Average Performer", 
-            2: "High Performer"
+            2: "Good Performer", # Added for 4 clusters
+            3: "High Performer"
         }
         self.model_metadata = {}
 
@@ -100,7 +101,6 @@ class MLService:
     
     async def run_monthly_analysis(self, year: int = None, month: int = None):
         """Run clustering analysis for specific month"""
-        from datetime import datetime, timedelta
         import calendar
         
         if not year or not month:
@@ -135,7 +135,6 @@ class MLService:
 
     async def run_quarterly_analysis(self, year: int = None, quarter: int = None):
         """Run clustering analysis for specific quarter"""
-        from datetime import datetime
         import calendar
         
         if not year or not quarter:
@@ -189,6 +188,9 @@ class MLService:
         
         # Group results by cluster
         clusters = {}
+        # Ensure display order matches the new 4 clusters if applicable
+        display_order = ["Needs Improvement", "Average Performer", "Good Performer", "High Performer"]
+        
         for user_result in result.results:
             cluster_label = user_result.cluster_label
             if cluster_label not in clusters:
@@ -196,12 +198,12 @@ class MLService:
             clusters[cluster_label].append(user_result)
         
         print(f"\n📈 CLUSTER DISTRIBUTION:")
-        for cluster_label, users in clusters.items():
-            print(f"  {cluster_label}: {len(users)} users ({len(users)/result.total_users*100:.1f}%)")
+        for cluster_label in display_order:
+            if cluster_label in clusters:
+                users = clusters[cluster_label]
+                print(f"  {cluster_label}: {len(users)} users ({len(users)/result.total_users*100:.1f}%)")
         
         print(f"\n👥 DETAILED RESULTS:")
-        # Display in order: High Performer, Average Performer, Needs Improvement
-        display_order = ["High Performer", "Average Performer", "Needs Improvement"]
         for cluster_label in display_order:
             if cluster_label not in clusters:
                 continue
@@ -343,32 +345,47 @@ class MLService:
         )
         
         if not attendance_records:
+            logger.warning(f"No attendance records found for user {user_id}. Returning default metrics.")
             return PerformanceMetrics(
                 user_id=user_id,
                 total_work_hours=0.0,
                 average_daily_hours=0.0,
                 attendance_rate=0.0,
                 overtime_ratio=0.0,
-                punctuality_score=0.0,
-                consistency_score=0.0,
-                productivity_score=0.0
+                punctuality_score=50.0, # Default to 50 for neutral
+                consistency_score=50.0, # Default to 50 for neutral
+                productivity_score=50.0 # Default to 50 for neutral
             )
 
         # Convert to DataFrame for easier processing
         df = pd.DataFrame(attendance_records)
         
+        # Ensure numeric columns are actually numeric
+        for col in ['workMinutes', 'overtimeMinutes']:
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+        
         # Calculate metrics
-        total_work_hours = df['workMinutes'].sum() / 60.0
-        total_days = len(df)
-        average_daily_hours = total_work_hours / total_days if total_days > 0 else 0
+        total_work_minutes = df['workMinutes'].sum()
+        total_work_hours = total_work_minutes / 60.0
+        
+        total_days_with_records = len(df) # Number of days with attendance records
+        average_daily_hours = total_work_hours / total_days_with_records if total_days_with_records > 0 else 0
         
         # Attendance rate (based on working days in period)
-        date_range_days = self._calculate_working_days(date_from, date_to)
-        attendance_rate = (total_days / date_range_days) * 100 if date_range_days > 0 else 0
+        # Use actual dates from records to determine the period if date_from/to are not provided
+        if not date_from and not date_to and not df.empty:
+            min_date = pd.to_datetime(df['date']).min().strftime('%Y-%m-%d')
+            max_date = pd.to_datetime(df['date']).max().strftime('%Y-%m-%d')
+            date_range_days = self._calculate_working_days(min_date, max_date)
+        else:
+            date_range_days = self._calculate_working_days(date_from, date_to)
+        
+        attendance_rate = (total_days_with_records / date_range_days) * 100 if date_range_days > 0 else 0
         
         # Overtime ratio
-        total_overtime = df['overtimeMinutes'].sum() / 60.0
-        overtime_ratio = (total_overtime / total_work_hours) * 100 if total_work_hours > 0 else 0
+        total_overtime_minutes = df['overtimeMinutes'].sum()
+        total_overtime_hours = total_overtime_minutes / 60.0
+        overtime_ratio = (total_overtime_hours / total_work_hours) * 100 if total_work_hours > 0 else 0
         
         # Punctuality score (based on clock-in times)
         punctuality_score = self._calculate_punctuality_score(df)
@@ -381,19 +398,19 @@ class MLService:
         
         return PerformanceMetrics(
             user_id=user_id,
-            total_work_hours=total_work_hours,
-            average_daily_hours=average_daily_hours,
-            attendance_rate=min(attendance_rate, 100),  # Cap at 100%
-            overtime_ratio=overtime_ratio,
-            punctuality_score=punctuality_score,
-            consistency_score=consistency_score,
-            productivity_score=productivity_score
+            total_work_hours=round(total_work_hours, 2),
+            average_daily_hours=round(average_daily_hours, 2),
+            attendance_rate=round(min(attendance_rate, 100), 2),  # Cap at 100%
+            overtime_ratio=round(overtime_ratio, 2),
+            punctuality_score=round(punctuality_score, 2),
+            consistency_score=round(consistency_score, 2),
+            productivity_score=round(productivity_score, 2)
         )
 
     def _calculate_working_days(self, date_from: str, date_to: str) -> int:
         """Calculate number of working days in date range"""
         if not date_from or not date_to:
-            return 22  # Default assumption for a month
+            return 22  # Default assumption for a month if no specific range
         
         try:
             start = datetime.strptime(date_from, "%Y-%m-%d")
@@ -408,11 +425,15 @@ class MLService:
                 current += timedelta(days=1)
             
             return working_days
-        except:
-            return 22
+        except Exception as e:
+            logger.error(f"Error in _calculate_working_days for range {date_from} to {date_to}: {e}")
+            return 22 # Fallback
 
     def _calculate_punctuality_score(self, df: pd.DataFrame) -> float:
         """Calculate punctuality score based on clock-in times"""
+        if df.empty:
+            return 50.0
+        
         try:
             # Convert target time to minutes for comparison
             target_hour, target_minute = map(int, settings.PUNCTUALITY_TIME_THRESHOLD.split(':'))
@@ -422,17 +443,19 @@ class MLService:
             for _, row in df.iterrows():
                 clock_in_str = str(row.get('clockInTime', ''))
                 
-                # Handle different time formats
+                # Handle different time formats (ISO, HH:MM, etc.)
                 if clock_in_str and clock_in_str != 'nan':
                     try:
-                        # Extract time from various formats
-                        if 'T' in clock_in_str:  # ISO format
-                            time_part = clock_in_str.split('T')[1].split('+')[0]
-                            hour, minute = map(int, time_part.split(':')[:2])
-                        elif ':' in clock_in_str:  # HH:MM format
-                            hour, minute = map(int, clock_in_str.split(':')[:2])
+                        # Attempt to parse as ISO format first (e.g., 2024-12-13T07:49:32+07:00)
+                        if 'T' in clock_in_str:
+                            dt_object = datetime.fromisoformat(clock_in_str)
+                            hour, minute = dt_object.hour, dt_object.minute
+                        elif ':' in clock_in_str: # HH:MM format
+                            time_parts = clock_in_str.split(':')
+                            hour = int(time_parts[0])
+                            minute = int(time_parts[1])
                         else:
-                            continue
+                            continue # Skip if format is not recognized
                         
                         clock_in_minutes = hour * 60 + minute
                         
@@ -440,17 +463,26 @@ class MLService:
                         if clock_in_minutes <= target_minutes + 15:
                             punctual_days += 1
                             
-                    except (ValueError, IndexError):
+                    except (ValueError, IndexError, TypeError) as e:
+                        logger.warning(f"Could not parse clockInTime '{clock_in_str}': {e}")
                         continue
             
             return (punctual_days / len(df)) * 100 if len(df) > 0 else 0
-        except:
+        except Exception as e:
+            logger.error(f"Error in _calculate_punctuality_score: {e}")
             return 50.0  # Default score
 
     def _calculate_consistency_score(self, df: pd.DataFrame) -> float:
         """Calculate consistency score based on work hours variation"""
+        if df.empty:
+            return 50.0
+        
         try:
-            work_hours = df['workMinutes'] / 60.0
+            work_hours = pd.to_numeric(df['workMinutes'], errors='coerce').fillna(0) / 60.0
+            
+            if work_hours.empty or work_hours.sum() == 0: # No work hours data
+                return 50.0
+            
             std_dev = work_hours.std()
             mean_hours = work_hours.mean()
             
@@ -462,19 +494,34 @@ class MLService:
                 consistency_score = 0
             
             return min(consistency_score, 100)
-        except:
+        except Exception as e:
+            logger.error(f"Error in _calculate_consistency_score: {e}")
             return 50.0
 
     def _calculate_productivity_score(self, df: pd.DataFrame) -> float:
         """Calculate productivity score based on work description and hours"""
+        if df.empty:
+            return 50.0
+        
         try:
             total_score = 0
             for _, row in df.iterrows():
-                work_desc = row.get('workDescription', '')
-                work_hours = row.get('workMinutes', 0) / 60.0
+                work_desc = str(row.get('workDescription', '')).strip()
+                
+                # Corrected: Directly get numeric value, no .fillna() on scalar
+                work_minutes_val = row.get('workMinutes', 0)
+                if not isinstance(work_minutes_val, (int, float)):
+                    try:
+                        work_minutes_val = float(work_minutes_val)
+                    except (ValueError, TypeError):
+                        work_minutes_val = 0
+                
+                work_hours = work_minutes_val / 60.0
                 
                 # Score based on description length and detail (max 40 points)
-                desc_score = min(len(work_desc) / 100, 1) * 40
+                desc_score = 0
+                if work_desc:
+                    desc_score = min(len(work_desc) / 100, 1) * 40
                 
                 # Score based on reasonable work hours (max 60 points)
                 hours_score = min(work_hours / settings.WORKING_HOURS_TARGET, 1) * 60
@@ -482,7 +529,8 @@ class MLService:
                 total_score += desc_score + hours_score
             
             return (total_score / len(df)) if len(df) > 0 else 0
-        except:
+        except Exception as e:
+            logger.error(f"Error in _calculate_productivity_score: {e}")
             return 50.0
 
     async def perform_clustering(
@@ -526,7 +574,15 @@ class MLService:
                     **metrics.dict()
                 })
             except Exception as e:
-                print(f"Error calculating metrics for user {user['id']}: {e}")
+                logger.error(f"Error calculating metrics for user {user['id']}: {e}")
+                # Append default metrics if calculation fails
+                performance_data.append({
+                    'user_id': user['id'],
+                    'worker_id': user.get('workerId', ''),
+                    'name': user.get('name', ''),
+                    'email': user.get('email', ''),
+                    **PerformanceMetrics(user_id=user['id']).dict() # Use default Pydantic model
+                })
                 continue
 
         if not performance_data:
@@ -539,13 +595,41 @@ class MLService:
         feature_columns = [col for col in self.feature_names if col in df.columns]
         X = df[feature_columns].fillna(0)
         
+        # Handle case where all feature values are identical (e.g., all zeros)
+        if X.nunique().sum() <= 1: # If all columns have only one unique value (e.g., all 0s)
+            logger.warning("All feature values are identical or too few unique values. Cannot perform meaningful clustering.")
+            # Assign all to a single cluster (e.g., "Needs Improvement")
+            results = []
+            for user_data in performance_data:
+                results.append(ClusteringResult(
+                    user_id=user_data['user_id'],
+                    worker_id=user_data['worker_id'],
+                    name=user_data['name'],
+                    cluster=0,
+                    cluster_label=self.cluster_labels.get(0, "Needs Improvement"),
+                    performance_score=0.0, # Set score to 0 if no meaningful data
+                    features={col: user_data[col] for col in feature_columns}
+                ))
+            return ClusteringResponse(
+                results=results,
+                cluster_centers={},
+                feature_names=feature_columns,
+                analysis_period={
+                    "date_from": date_from or "All Time",
+                    "date_to": date_to or "All Time"
+                },
+                total_users=len(users),
+                model_accuracy=0.0 # Accuracy is 0 if no clustering performed
+            )
+
         # Scale features
         X_scaled = self.scaler.fit_transform(X)
         
-        # Adjust n_clusters if we have fewer users
-        if len(df) < n_clusters:
-            n_clusters = len(df)
-            print(f"⚠️ Adjusted clusters to {n_clusters} due to limited data")
+        # Adjust n_clusters if we have fewer users or unique data points
+        unique_rows = X.drop_duplicates().shape[0]
+        if unique_rows < n_clusters:
+            n_clusters = max(1, unique_rows) # At least 1 cluster
+            logger.warning(f"Adjusted clusters to {n_clusters} due to limited unique data points.")
         
         # Perform K-Means clustering
         self.kmeans_model = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
@@ -557,7 +641,8 @@ class MLService:
             cluster_mask = clusters == i
             if np.any(cluster_mask):
                 cluster_users = df[cluster_mask]
-                avg_performance = cluster_users[feature_columns].mean().mean()
+                # Calculate average performance score for this cluster
+                avg_performance = cluster_users['productivity_score'].mean() # Use productivity as primary sort
                 cluster_performance[i] = avg_performance
         
         # Sort clusters by performance and reassign labels
@@ -570,10 +655,13 @@ class MLService:
         clusters = np.array([cluster_mapping[c] for c in clusters])
         
         # Calculate silhouette score for model evaluation
-        if len(set(clusters)) > 1:
-            silhouette_avg = silhouette_score(X_scaled, clusters)
-        else:
-            silhouette_avg = 0.0
+        silhouette_avg = 0.0
+        if len(set(clusters)) > 1 and len(X_scaled) > 1: # Need at least 2 clusters and 2 samples for silhouette
+            try:
+                silhouette_avg = silhouette_score(X_scaled, clusters)
+            except Exception as e:
+                logger.warning(f"Could not calculate silhouette score: {e}")
+                silhouette_avg = 0.0
 
         # Save the trained models
         self.save_models()
@@ -604,8 +692,11 @@ class MLService:
 
         # Get cluster centers
         cluster_centers = {}
-        for i, center in enumerate(self.kmeans_model.cluster_centers_):
-            cluster_centers[f"cluster_{i}"] = center.tolist()
+        if self.kmeans_model:
+            for i, center in enumerate(self.kmeans_model.cluster_centers_):
+                # Map original cluster index to new sorted cluster index
+                original_cluster_index = next(k for k, v in cluster_mapping.items() if v == i)
+                cluster_centers[f"cluster_{i}"] = center.tolist()
 
         return ClusteringResponse(
             results=results,
@@ -616,7 +707,7 @@ class MLService:
                 "date_to": date_to or "All Time"
             },
             total_users=len(users),
-            model_accuracy=silhouette_avg
+            model_accuracy=round(silhouette_avg, 3)
         )
 
     def _calculate_overall_score(self, features: Dict[str, float]) -> float:
@@ -636,11 +727,11 @@ class MLService:
         for feature, value in features.items():
             if feature in weights:
                 # Normalize values to 0-100 scale
-                normalized_value = min(value, 100)
+                normalized_value = min(max(value, 0), 100) # Ensure value is between 0 and 100
                 total_score += normalized_value * weights[feature]
                 total_weight += weights[feature]
         
-        return total_score / total_weight if total_weight > 0 else 0
+        return round(total_score / total_weight if total_weight > 0 else 0, 2)
 
 # Global instance
 ml_service = MLService()

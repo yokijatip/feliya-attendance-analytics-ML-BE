@@ -6,6 +6,7 @@ import json
 import os
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 
 from app.core.config import settings
 
@@ -46,14 +47,22 @@ class FirebaseService:
             raise
 
     def _convert_firebase_data(self, doc_data: Dict) -> Dict:
-        """Convert Firebase datetime objects to strings"""
+        """Convert Firebase datetime objects and other types to strings/standard types"""
         for key, value in doc_data.items():
-            if hasattr(value, 'isoformat'):
+            if hasattr(value, 'isoformat'): # For datetime objects
                 doc_data[key] = value.isoformat()
-            elif hasattr(value, 'strftime'):
-                doc_data[key] = value.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+            elif isinstance(value, datetime): # For datetime objects not caught by isoformat
+                doc_data[key] = value.isoformat()
+            elif hasattr(value, 'strftime'): # For time objects (if any)
+                doc_data[key] = value.strftime('%H:%M:%S')
             elif value is None:
                 doc_data[key] = None
+            # Ensure numeric fields are numbers, not strings if they somehow become strings
+            if key in ['workMinutes', 'overtimeMinutes', 'totalMinutes'] and isinstance(value, str):
+                try:
+                    doc_data[key] = int(value)
+                except ValueError:
+                    doc_data[key] = 0 # Default to 0 if conversion fails
         return doc_data
 
     async def get_collection(self, collection_name: str) -> List[Dict]:

@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Dict, Optional
 from datetime import datetime
 
@@ -24,6 +24,10 @@ class ClusteringResponse(BaseModel):
     analysis_period: Dict[str, str]
     total_users: int
     model_accuracy: float
+
+    class Config:
+        # Suppress Pydantic warning for field names starting with 'model_'
+        protected_namespaces = ()
 
 class PerformanceMetrics(BaseModel):
     user_id: str
