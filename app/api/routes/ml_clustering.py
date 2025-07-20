@@ -1,15 +1,22 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
 from typing import List, Optional, Dict
+import asyncio
+import logging
 
 from app.models.ml_models import ClusteringRequest, ClusteringResponse, PerformanceInsights
 from app.services.ml_service import ml_service
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 @router.post("/clustering/analyze", response_model=ClusteringResponse)
-async def perform_clustering_analysis(request: ClusteringRequest):
+async def perform_clustering_analysis(
+    request: ClusteringRequest,
+    background_tasks: BackgroundTasks
+):
     """Perform K-Means clustering analysis on employee performance data"""
     try:
+        # Add background task for model saving
         result = await ml_service.perform_clustering(
             user_ids=request.user_ids,
             date_from=request.date_from,
@@ -17,20 +24,25 @@ async def perform_clustering_analysis(request: ClusteringRequest):
             n_clusters=request.n_clusters
         )
         
+        # Save visualization in background
+        background_tasks.add_task(ml_service.create_visualizations_async, result)
+        
         return result
     
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        logger.error(f"Clustering analysis error: {e}")
         raise HTTPException(status_code=500, detail=f"Error performing clustering analysis: {str(e)}")
 
 @router.get("/clustering/quick-analysis", response_model=ClusteringResponse)
 async def quick_clustering_analysis(
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
-    n_clusters: Optional[int] = Query(3)
+    n_clusters: Optional[int] = Query(3),
+    background_tasks: BackgroundTasks = None
 ):
-    """Perform quick clustering analysis on all active workers"""
+    """Perform quick clustering analysis on all active workers with enhanced error handling"""
     try:
         result = await ml_service.perform_clustering(
             user_ids=None,  # All workers
@@ -39,219 +51,119 @@ async def quick_clustering_analysis(
             n_clusters=n_clusters
         )
         
+        # Create visualization in background if requested
+        if background_tasks:
+            background_tasks.add_task(ml_service.create_visualizations_async, result)
+        
         return result
     
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        logger.error(f"Quick analysis error: {e}")
         raise HTTPException(status_code=500, detail=f"Error performing quick analysis: {str(e)}")
 
-@router.get("/clustering/monthly-analysis", response_model=ClusteringResponse)
-async def monthly_clustering_analysis(
-    year: Optional[int] = Query(None, description="Year (default: current year)"),
-    month: Optional[int] = Query(None, description="Month 1-12 (default: current month)"),
-    n_clusters: Optional[int] = Query(3)
-):
-    """Perform clustering analysis for specific month"""
-    try:
-        from datetime import datetime
-        import calendar
-        
-        if not year or not month:
-            now = datetime.now()
-            year = year or now.year
-            month = month or now.month
-        
-        # Validate month
-        if month < 1 or month > 12:
-            raise HTTPException(status_code=400, detail="Month must be between 1-12")
-        
-        # Get first and last day of month
-        first_day = datetime(year, month, 1)
-        last_day = datetime(year, month, calendar.monthrange(year, month)[1])
-        
-        date_from = first_day.strftime('%Y-%m-%d')
-        date_to = last_day.strftime('%Y-%m-%d')
-        
-        result = await ml_service.perform_clustering(
-            user_ids=None,
-            date_from=date_from,
-            date_to=date_to,
-            n_clusters=n_clusters
-        )
-        
-        return result
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error performing monthly analysis: {str(e)}")
-
-@router.get("/clustering/quarterly-analysis", response_model=ClusteringResponse)
-async def quarterly_clustering_analysis(
-    year: Optional[int] = Query(None, description="Year (default: current year)"),
-    quarter: Optional[int] = Query(None, description="Quarter 1-4 (default: current quarter)"),
-    n_clusters: Optional[int] = Query(3)
-):
-    """Perform clustering analysis for specific quarter"""
-    try:
-        from datetime import datetime
-        import calendar
-        
-        if not year or not quarter:
-            now = datetime.now()
-            year = year or now.year
-            quarter = quarter or ((now.month - 1) // 3 + 1)
-        
-        # Validate quarter
-        if quarter < 1 or quarter > 4:
-            raise HTTPException(status_code=400, detail="Quarter must be between 1-4")
-        
-        # Define quarter months
-        quarter_months = {
-            1: (1, 3),   # Q1: Jan-Mar
-            2: (4, 6),   # Q2: Apr-Jun
-            3: (7, 9),   # Q3: Jul-Sep
-            4: (10, 12)  # Q4: Oct-Dec
-        }
-        
-        start_month, end_month = quarter_months[quarter]
-        
-        first_day = datetime(year, start_month, 1)
-        last_day = datetime(year, end_month, calendar.monthrange(year, end_month)[1])
-        
-        date_from = first_day.strftime('%Y-%m-%d')
-        date_to = last_day.strftime('%Y-%m-%d')
-        
-        result = await ml_service.perform_clustering(
-            user_ids=None,
-            date_from=date_from,
-            date_to=date_to,
-            n_clusters=n_clusters
-        )
-        
-        return result
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error performing quarterly analysis: {str(e)}")
-
-@router.get("/clustering/yearly-analysis", response_model=ClusteringResponse)
-async def yearly_clustering_analysis(
-    year: Optional[int] = Query(None, description="Year (default: current year)"),
-    n_clusters: Optional[int] = Query(3)
-):
-    """Perform clustering analysis for specific year"""
-    try:
-        from datetime import datetime
-        
-        if not year:
-            year = datetime.now().year
-        
-        date_from = f"{year}-01-01"
-        date_to = f"{year}-12-31"
-        
-        result = await ml_service.perform_clustering(
-            user_ids=None,
-            date_from=date_from,
-            date_to=date_to,
-            n_clusters=n_clusters
-        )
-        
-        return result
-    
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error performing yearly analysis: {str(e)}")
-@router.get("/clustering/user/{user_id}/predict")
-async def predict_user_cluster(user_id: str):
-    """Predict cluster for a specific user using trained model"""
-    try:
-        result = await ml_service.predict_user_cluster(user_id)
-        return result
-    
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error predicting user cluster: {str(e)}")
-
-@router.get("/performance/{user_id}/metrics")
-async def get_user_performance_metrics(
-    user_id: str,
-    date_from: Optional[str] = Query(None),
-    date_to: Optional[str] = Query(None)
-):
-    """Get detailed performance metrics for a specific user"""
-    try:
-        metrics = await ml_service.calculate_performance_metrics(
-            user_id, date_from, date_to
-        )
-        
-        return {
-            "user_id": user_id,
-            "metrics": metrics.dict(),
-            "analysis_period": {
-                "date_from": date_from,
-                "date_to": date_to
-            }
-        }
-    
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error calculating performance metrics: {str(e)}")
-
-@router.get("/performance/{user_id}/insights", response_model=PerformanceInsights)
-async def get_user_performance_insights(user_id: str):
-    """Get AI-powered performance insights and recommendations"""
-    try:
-        insights = await ml_service.generate_performance_insights(user_id)
-        return insights
-    
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error generating insights: {str(e)}")
-
-@router.post("/clustering/batch-predict")
-async def batch_predict_clusters(user_ids: List[str]):
-    """Predict clusters for multiple users"""
-    try:
-        if not ml_service.kmeans_model:
-            raise HTTPException(
-                status_code=400,
-                detail="No trained model available. Run clustering analysis first."
-            )
-        
-        results = []
-        for user_id in user_ids:
-            try:
-                result = await ml_service.predict_user_cluster(user_id)
-                results.append(result)
-            except Exception as user_error:
-                results.append({
-                    "user_id": user_id,
-                    "error": str(user_error)
-                })
-        
-        return results
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error in batch prediction: {str(e)}")
-
-@router.get("/clustering/model-info")
-async def get_clustering_model_info():
-    """Get information about the current clustering model"""
+@router.get("/clustering/model-status")
+async def get_model_status():
+    """Get detailed information about the current clustering model"""
     try:
         return {
+            "model_trained": ml_service.kmeans_model is not None,
             "available_clusters": len(ml_service.cluster_labels),
             "cluster_labels": ml_service.cluster_labels,
             "feature_names": ml_service.feature_names,
-            "model_trained": ml_service.kmeans_model is not None,
+            "model_metadata": ml_service.model_metadata,
             "model_info": {
                 "algorithm": "K-Means",
                 "n_clusters": len(ml_service.cluster_labels),
-                "features_count": len(ml_service.feature_names)
+                "features_count": len(ml_service.feature_names),
+                "last_trained": ml_service.model_metadata.get('last_trained'),
+                "training_data_size": ml_service.model_metadata.get('training_data_size', 0)
             }
         }
     
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error getting model info: {str(e)}")
+        logger.error(f"Model status error: {e}")
+        raise HTTPException(status_code=500, detail=f"Error getting model status: {str(e)}")
+
+@router.post("/clustering/retrain")
+async def retrain_model(
+    background_tasks: BackgroundTasks,
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    n_clusters: Optional[int] = Query(3)
+):
+    """Retrain the clustering model with new data"""
+    try:
+        logger.info("🔄 Starting model retraining...")
+        
+        # Perform clustering which will retrain the model
+        result = await ml_service.perform_clustering(
+            user_ids=None,
+            date_from=date_from,
+            date_to=date_to,
+            n_clusters=n_clusters
+        )
+        
+        # Create new visualizations in background
+        background_tasks.add_task(ml_service.create_visualizations_async, result)
+        
+        return {
+            "message": "Model retrained successfully",
+            "model_accuracy": result.model_accuracy,
+            "total_users": result.total_users,
+            "retrained_at": ml_service.model_metadata.get('last_trained')
+        }
+    
+    except Exception as e:
+        logger.error(f"Model retraining error: {e}")
+        raise HTTPException(status_code=500, detail=f"Error retraining model: {str(e)}")
+
+@router.get("/clustering/export-results")
+async def export_clustering_results(
+    format: str = Query("json", regex="^(json|csv)$"),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None)
+):
+    """Export clustering results in different formats"""
+    try:
+        result = await ml_service.perform_clustering(
+            date_from=date_from,
+            date_to=date_to
+        )
+        
+        if format == "csv":
+            import pandas as pd
+            from io import StringIO
+            from fastapi.responses import StreamingResponse
+            
+            # Convert to DataFrame
+            data = []
+            for r in result.results:
+                row = {
+                    'user_id': r.user_id,
+                    'worker_id': r.worker_id,
+                    'name': r.name,
+                    'cluster': r.cluster,
+                    'cluster_label': r.cluster_label,
+                    'performance_score': r.performance_score,
+                    **r.features
+                }
+                data.append(row)
+            
+            df = pd.DataFrame(data)
+            csv_buffer = StringIO()
+            df.to_csv(csv_buffer, index=False)
+            csv_buffer.seek(0)
+            
+            return StreamingResponse(
+                iter([csv_buffer.getvalue()]),
+                media_type="text/csv",
+                headers={"Content-Disposition": "attachment; filename=clustering_results.csv"}
+            )
+        
+        return result  # JSON format
+    
+    except Exception as e:
+        logger.error(f"Export error: {e}")
+        raise HTTPException(status_code=500, detail=f"Error exporting results: {str(e)}")
