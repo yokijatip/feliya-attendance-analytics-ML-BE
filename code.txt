@@ -29,8 +29,9 @@ Struktur folder:
 -run_server.py
 -setup_firebase.py
 
-Full Code:
-app > api > routes > analytics.py:
+Full code:
+api > routes > 
+1. analytics.py:
 from fastapi import APIRouter, HTTPException, Query
 from typing import List, Optional, Dict
 from datetime import datetime, timedelta
@@ -232,7 +233,7 @@ async def get_daily_trends(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error getting daily trends: {str(e)}")
 
-app > api > routes > attendance.py:
+attendance.py:
 from fastapi import APIRouter, HTTPException, Query
 from typing import List, Optional
 from datetime import datetime
@@ -330,19 +331,26 @@ async def get_user_attendance_summary(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error getting attendance summary: {str(e)}")
 
-app > api > routes > ml_clustering.py:
-from fastapi import APIRouter, HTTPException, Query
+ml_clustering.py:
+from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
 from typing import List, Optional, Dict
+import asyncio
+import logging
 
 from app.models.ml_models import ClusteringRequest, ClusteringResponse, PerformanceInsights
 from app.services.ml_service import ml_service
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 @router.post("/clustering/analyze", response_model=ClusteringResponse)
-async def perform_clustering_analysis(request: ClusteringRequest):
+async def perform_clustering_analysis(
+    request: ClusteringRequest,
+    background_tasks: BackgroundTasks
+):
     """Perform K-Means clustering analysis on employee performance data"""
     try:
+        # Add background task for model saving
         result = await ml_service.perform_clustering(
             user_ids=request.user_ids,
             date_from=request.date_from,
@@ -350,20 +358,25 @@ async def perform_clustering_analysis(request: ClusteringRequest):
             n_clusters=request.n_clusters
         )
         
+        # Save visualization in background
+        background_tasks.add_task(ml_service.create_visualizations_async, result)
+        
         return result
     
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        logger.error(f"Clustering analysis error: {e}")
         raise HTTPException(status_code=500, detail=f"Error performing clustering analysis: {str(e)}")
 
 @router.get("/clustering/quick-analysis", response_model=ClusteringResponse)
 async def quick_clustering_analysis(
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
-    n_clusters: Optional[int] = Query(3)
+    n_clusters: Optional[int] = Query(3),
+    background_tasks: BackgroundTasks = None
 ):
-    """Perform quick clustering analysis on all active workers"""
+    """Perform quick clustering analysis on all active workers with enhanced error handling"""
     try:
         result = await ml_service.perform_clustering(
             user_ids=None,  # All workers
@@ -372,224 +385,124 @@ async def quick_clustering_analysis(
             n_clusters=n_clusters
         )
         
+        # Create visualization in background if requested
+        if background_tasks:
+            background_tasks.add_task(ml_service.create_visualizations_async, result)
+        
         return result
     
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        logger.error(f"Quick analysis error: {e}")
         raise HTTPException(status_code=500, detail=f"Error performing quick analysis: {str(e)}")
 
-@router.get("/clustering/monthly-analysis", response_model=ClusteringResponse)
-async def monthly_clustering_analysis(
-    year: Optional[int] = Query(None, description="Year (default: current year)"),
-    month: Optional[int] = Query(None, description="Month 1-12 (default: current month)"),
-    n_clusters: Optional[int] = Query(3)
-):
-    """Perform clustering analysis for specific month"""
-    try:
-        from datetime import datetime
-        import calendar
-        
-        if not year or not month:
-            now = datetime.now()
-            year = year or now.year
-            month = month or now.month
-        
-        # Validate month
-        if month < 1 or month > 12:
-            raise HTTPException(status_code=400, detail="Month must be between 1-12")
-        
-        # Get first and last day of month
-        first_day = datetime(year, month, 1)
-        last_day = datetime(year, month, calendar.monthrange(year, month)[1])
-        
-        date_from = first_day.strftime('%Y-%m-%d')
-        date_to = last_day.strftime('%Y-%m-%d')
-        
-        result = await ml_service.perform_clustering(
-            user_ids=None,
-            date_from=date_from,
-            date_to=date_to,
-            n_clusters=n_clusters
-        )
-        
-        return result
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error performing monthly analysis: {str(e)}")
-
-@router.get("/clustering/quarterly-analysis", response_model=ClusteringResponse)
-async def quarterly_clustering_analysis(
-    year: Optional[int] = Query(None, description="Year (default: current year)"),
-    quarter: Optional[int] = Query(None, description="Quarter 1-4 (default: current quarter)"),
-    n_clusters: Optional[int] = Query(3)
-):
-    """Perform clustering analysis for specific quarter"""
-    try:
-        from datetime import datetime
-        import calendar
-        
-        if not year or not quarter:
-            now = datetime.now()
-            year = year or now.year
-            quarter = quarter or ((now.month - 1) // 3 + 1)
-        
-        # Validate quarter
-        if quarter < 1 or quarter > 4:
-            raise HTTPException(status_code=400, detail="Quarter must be between 1-4")
-        
-        # Define quarter months
-        quarter_months = {
-            1: (1, 3),   # Q1: Jan-Mar
-            2: (4, 6),   # Q2: Apr-Jun
-            3: (7, 9),   # Q3: Jul-Sep
-            4: (10, 12)  # Q4: Oct-Dec
-        }
-        
-        start_month, end_month = quarter_months[quarter]
-        
-        first_day = datetime(year, start_month, 1)
-        last_day = datetime(year, end_month, calendar.monthrange(year, end_month)[1])
-        
-        date_from = first_day.strftime('%Y-%m-%d')
-        date_to = last_day.strftime('%Y-%m-%d')
-        
-        result = await ml_service.perform_clustering(
-            user_ids=None,
-            date_from=date_from,
-            date_to=date_to,
-            n_clusters=n_clusters
-        )
-        
-        return result
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error performing quarterly analysis: {str(e)}")
-
-@router.get("/clustering/yearly-analysis", response_model=ClusteringResponse)
-async def yearly_clustering_analysis(
-    year: Optional[int] = Query(None, description="Year (default: current year)"),
-    n_clusters: Optional[int] = Query(3)
-):
-    """Perform clustering analysis for specific year"""
-    try:
-        from datetime import datetime
-        
-        if not year:
-            year = datetime.now().year
-        
-        date_from = f"{year}-01-01"
-        date_to = f"{year}-12-31"
-        
-        result = await ml_service.perform_clustering(
-            user_ids=None,
-            date_from=date_from,
-            date_to=date_to,
-            n_clusters=n_clusters
-        )
-        
-        return result
-    
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error performing yearly analysis: {str(e)}")
-@router.get("/clustering/user/{user_id}/predict")
-async def predict_user_cluster(user_id: str):
-    """Predict cluster for a specific user using trained model"""
-    try:
-        result = await ml_service.predict_user_cluster(user_id)
-        return result
-    
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error predicting user cluster: {str(e)}")
-
-@router.get("/performance/{user_id}/metrics")
-async def get_user_performance_metrics(
-    user_id: str,
-    date_from: Optional[str] = Query(None),
-    date_to: Optional[str] = Query(None)
-):
-    """Get detailed performance metrics for a specific user"""
-    try:
-        metrics = await ml_service.calculate_performance_metrics(
-            user_id, date_from, date_to
-        )
-        
-        return {
-            "user_id": user_id,
-            "metrics": metrics.dict(),
-            "analysis_period": {
-                "date_from": date_from,
-                "date_to": date_to
-            }
-        }
-    
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error calculating performance metrics: {str(e)}")
-
-@router.get("/performance/{user_id}/insights", response_model=PerformanceInsights)
-async def get_user_performance_insights(user_id: str):
-    """Get AI-powered performance insights and recommendations"""
-    try:
-        insights = await ml_service.generate_performance_insights(user_id)
-        return insights
-    
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error generating insights: {str(e)}")
-
-@router.post("/clustering/batch-predict")
-async def batch_predict_clusters(user_ids: List[str]):
-    """Predict clusters for multiple users"""
-    try:
-        if not ml_service.kmeans_model:
-            raise HTTPException(
-                status_code=400,
-                detail="No trained model available. Run clustering analysis first."
-            )
-        
-        results = []
-        for user_id in user_ids:
-            try:
-                result = await ml_service.predict_user_cluster(user_id)
-                results.append(result)
-            except Exception as user_error:
-                results.append({
-                    "user_id": user_id,
-                    "error": str(user_error)
-                })
-        
-        return results
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error in batch prediction: {str(e)}")
-
-@router.get("/clustering/model-info")
-async def get_clustering_model_info():
-    """Get information about the current clustering model"""
+@router.get("/clustering/model-status")
+async def get_model_status():
+    """Get detailed information about the current clustering model"""
     try:
         return {
+            "model_trained": ml_service.kmeans_model is not None,
             "available_clusters": len(ml_service.cluster_labels),
             "cluster_labels": ml_service.cluster_labels,
             "feature_names": ml_service.feature_names,
-            "model_trained": ml_service.kmeans_model is not None,
+            "model_metadata": ml_service.model_metadata,
             "model_info": {
                 "algorithm": "K-Means",
                 "n_clusters": len(ml_service.cluster_labels),
-                "features_count": len(ml_service.feature_names)
+                "features_count": len(ml_service.feature_names),
+                "last_trained": ml_service.model_metadata.get('last_trained'),
+                "training_data_size": ml_service.model_metadata.get('training_data_size', 0)
             }
         }
     
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error getting model info: {str(e)}")
+        logger.error(f"Model status error: {e}")
+        raise HTTPException(status_code=500, detail=f"Error getting model status: {str(e)}")
 
-app > api > routes > users.py:
+@router.post("/clustering/retrain")
+async def retrain_model(
+    background_tasks: BackgroundTasks,
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    n_clusters: Optional[int] = Query(3)
+):
+    """Retrain the clustering model with new data"""
+    try:
+        logger.info("🔄 Starting model retraining...")
+        
+        # Perform clustering which will retrain the model
+        result = await ml_service.perform_clustering(
+            user_ids=None,
+            date_from=date_from,
+            date_to=date_to,
+            n_clusters=n_clusters
+        )
+        
+        # Create new visualizations in background
+        background_tasks.add_task(ml_service.create_visualizations_async, result)
+        
+        return {
+            "message": "Model retrained successfully",
+            "model_accuracy": result.model_accuracy,
+            "total_users": result.total_users,
+            "retrained_at": ml_service.model_metadata.get('last_trained')
+        }
+    
+    except Exception as e:
+        logger.error(f"Model retraining error: {e}")
+        raise HTTPException(status_code=500, detail=f"Error retraining model: {str(e)}")
+
+@router.get("/clustering/export-results")
+async def export_clustering_results(
+    format: str = Query("json", regex="^(json|csv)$"),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None)
+):
+    """Export clustering results in different formats"""
+    try:
+        result = await ml_service.perform_clustering(
+            date_from=date_from,
+            date_to=date_to
+        )
+        
+        if format == "csv":
+            import pandas as pd
+            from io import StringIO
+            from fastapi.responses import StreamingResponse
+            
+            # Convert to DataFrame
+            data = []
+            for r in result.results:
+                row = {
+                    'user_id': r.user_id,
+                    'worker_id': r.worker_id,
+                    'name': r.name,
+                    'cluster': r.cluster,
+                    'cluster_label': r.cluster_label,
+                    'performance_score': r.performance_score,
+                    **r.features
+                }
+                data.append(row)
+            
+            df = pd.DataFrame(data)
+            csv_buffer = StringIO()
+            df.to_csv(csv_buffer, index=False)
+            csv_buffer.seek(0)
+            
+            return StreamingResponse(
+                iter([csv_buffer.getvalue()]),
+                media_type="text/csv",
+                headers={"Content-Disposition": "attachment; filename=clustering_results.csv"}
+            )
+        
+        return result  # JSON format
+    
+    except Exception as e:
+        logger.error(f"Export error: {e}")
+        raise HTTPException(status_code=500, detail=f"Error exporting results: {str(e)}")
+
+users.py:
 from fastapi import APIRouter, HTTPException, Query
 from typing import List, Optional
 from datetime import datetime
@@ -677,7 +590,8 @@ async def get_user_by_worker_id(worker_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching user: {str(e)}")
 
-app > core > config.py:
+app > core >
+config.py:
 from pydantic_settings import BaseSettings
 from typing import List
 import os
@@ -716,7 +630,8 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
-app > models > attendance.py:
+app > models
+attendance.py:
 from pydantic import BaseModel, Field
 from datetime import datetime
 from typing import Optional, Any
@@ -776,7 +691,7 @@ class AttendanceAnalytics(BaseModel):
     punctuality_score: float
     productivity_score: float
 
-app > models > ml_models.py:
+ml_models.py:
 from pydantic import BaseModel
 from typing import List, Dict, Optional
 from datetime import datetime
@@ -821,7 +736,7 @@ class PerformanceInsights(BaseModel):
     strengths: List[str]
     areas_for_improvement: List[str]
 
-app > models > users.py:
+users.py:
 from pydantic import BaseModel, Field
 from datetime import datetime
 from typing import Optional, Any
@@ -871,7 +786,7 @@ class UserPerformance(BaseModel):
     attendance_rate: float
     productivity_metrics: dict
 
-app > services > firebase_service.py:
+app > services :
 import firebase_admin
 from firebase_admin import credentials, firestore
 from google.cloud.firestore_v1 import FieldFilter
@@ -1046,7 +961,7 @@ class FirebaseService:
 # Global instance
 firebase_service = FirebaseService()
 
-app > services > ml_service.py:
+ml_service.py:
 import pandas as pd
 import numpy as np
 from sklearn.cluster import KMeans
@@ -1058,10 +973,15 @@ import os
 import matplotlib.pyplot as plt
 import seaborn as sns
 from typing import List, Dict, Tuple, Optional
+import logging
 
 from app.services.firebase_service import firebase_service
 from app.models.ml_models import PerformanceMetrics, ClusteringResult, ClusteringResponse, PerformanceInsights
 from app.core.config import settings
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class MLService:
     def __init__(self):
@@ -1114,6 +1034,13 @@ class MLService:
             users = await firebase_service.get_users_by_role("worker")
             if not users:
                 print("⚠️ No worker users found. Skipping clustering analysis.")
+                return
+            
+            # Check if users have attendance data
+            sample_user = users[0]
+            attendance_sample = await firebase_service.get_attendance_by_user(sample_user['id'])
+            if not attendance_sample:
+                print("⚠️ No attendance data found. Skipping clustering analysis.")
                 return
             
             # Perform clustering analysis
@@ -1251,9 +1178,12 @@ class MLService:
     def create_visualizations(self, result: ClusteringResponse):
         """Create and save visualizations"""
         try:
-            # Set style
-            plt.style.use('seaborn-v0_8')
-            sns.set_palette("husl")
+            # Set style with fallback
+            try:
+                plt.style.use('seaborn-v0_8')
+                sns.set_palette("husl")
+            except:
+                plt.style.use('default')
             
             # Create figure with subplots
             fig, axes = plt.subplots(2, 2, figsize=(15, 12))
@@ -1276,7 +1206,16 @@ class MLService:
             axes[0, 0].set_title('Cluster Distribution')
             
             # 2. Performance Score by Cluster (Box Plot)
-            sns.boxplot(data=df_results, x='cluster', y='performance_score', ax=axes[0, 1])
+            try:
+                sns.boxplot(data=df_results, x='cluster', y='performance_score', ax=axes[0, 1])
+            except:
+                # Fallback to basic plot
+                for i, cluster in enumerate(df_results['cluster'].unique()):
+                    cluster_data = df_results[df_results['cluster'] == cluster]['performance_score']
+                    axes[0, 1].scatter([i] * len(cluster_data), cluster_data, alpha=0.6)
+                axes[0, 1].set_xticks(range(len(df_results['cluster'].unique())))
+                axes[0, 1].set_xticklabels(df_results['cluster'].unique())
+            
             axes[0, 1].set_title('Performance Score by Cluster')
             axes[0, 1].tick_params(axis='x', rotation=45)
             
@@ -1292,14 +1231,26 @@ class MLService:
             axes[1, 0].set_ylabel('Productivity Score')
             axes[1, 0].set_title('Attendance vs Productivity')
             
-            # 4. Feature Comparison (Radar Chart alternative - Heatmap)
+            # 4. Feature Comparison (Heatmap)
             feature_cols = ['attendance_rate', 'punctuality_score', 'productivity_score', 'consistency_score']
-            cluster_means = df_results.groupby('cluster')[feature_cols].mean()
+            available_features = [col for col in feature_cols if col in df_results.columns]
             
-            sns.heatmap(cluster_means.T, annot=True, fmt='.1f', cmap='RdYlGn', ax=axes[1, 1])
-            axes[1, 1].set_title('Average Features by Cluster')
-            axes[1, 1].set_xlabel('Cluster')
-            axes[1, 1].set_ylabel('Features')
+            if available_features:
+                cluster_means = df_results.groupby('cluster')[available_features].mean()
+                
+                try:
+                    sns.heatmap(cluster_means.T, annot=True, fmt='.1f', cmap='RdYlGn', ax=axes[1, 1])
+                except:
+                    # Fallback heatmap
+                    im = axes[1, 1].imshow(cluster_means.T.values, cmap='RdYlGn', aspect='auto')
+                    axes[1, 1].set_xticks(range(len(cluster_means.index)))
+                    axes[1, 1].set_xticklabels(cluster_means.index, rotation=45)
+                    axes[1, 1].set_yticks(range(len(available_features)))
+                    axes[1, 1].set_yticklabels(available_features)
+                
+                axes[1, 1].set_title('Average Features by Cluster')
+                axes[1, 1].set_xlabel('Cluster')
+                axes[1, 1].set_ylabel('Features')
             
             plt.tight_layout()
             
@@ -1308,12 +1259,11 @@ class MLService:
             plt.savefig(viz_path, dpi=300, bbox_inches='tight')
             print(f"📊 Visualization saved to: {viz_path}")
             
-            # Show plot (if running interactively)
-            # plt.show()
             plt.close()
             
         except Exception as e:
             print(f"⚠️ Could not create visualizations: {e}")
+
     def save_models(self):
         """Save trained models to disk"""
         try:
@@ -1510,17 +1460,24 @@ class MLService:
         # Calculate performance metrics for all users
         performance_data = []
         for user in users:
-            metrics = await self.calculate_performance_metrics(
-                user['id'], date_from, date_to
-            )
-            
-            performance_data.append({
-                'user_id': user['id'],
-                'worker_id': user.get('workerId', ''),
-                'name': user.get('name', ''),
-                'email': user.get('email', ''),
-                **metrics.dict()
-            })
+            try:
+                metrics = await self.calculate_performance_metrics(
+                    user['id'], date_from, date_to
+                )
+                
+                performance_data.append({
+                    'user_id': user['id'],
+                    'worker_id': user.get('workerId', ''),
+                    'name': user.get('name', ''),
+                    'email': user.get('email', ''),
+                    **metrics.dict()
+                })
+            except Exception as e:
+                print(f"Error calculating metrics for user {user['id']}: {e}")
+                continue
+
+        if not performance_data:
+            raise ValueError("No valid performance data found for clustering")
 
         # Convert to DataFrame
         df = pd.DataFrame(performance_data)
@@ -1531,6 +1488,11 @@ class MLService:
         
         # Scale features
         X_scaled = self.scaler.fit_transform(X)
+        
+        # Adjust n_clusters if we have fewer users
+        if len(df) < n_clusters:
+            n_clusters = len(df)
+            print(f"⚠️ Adjusted clusters to {n_clusters} due to limited data")
         
         # Perform K-Means clustering
         self.kmeans_model = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
@@ -1817,372 +1779,6 @@ if __name__ == "__main__":
         reload=settings.DEBUG
     )
 
-config > firebase-credentials.json:
-
-requirements.txt:
-# Core FastAPI dependencies
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-python-dotenv==1.0.0
-pydantic==2.5.0
-pydantic-settings==2.1.0
-
-# Firebase
-firebase-admin==6.0.0
-google-cloud-firestore==2.13.1
-
-# Machine Learning & Data Processing
-scikit-learn==1.3.2
-pandas==2.1.4
-numpy==1.25.2
-matplotlib==3.8.2
-seaborn==0.13.0
-joblib==1.3.2
-
-# Data processing utilities
-python-dateutil==2.8.2
-pytz==2023.3
-
-# API utilities
-httpx==0.25.2
-python-multipart==0.0.6
-
-README.md:
-# Employee Performance Analytics API
-
-Backend API untuk analisis performa karyawan menggunakan K-Means clustering dengan integrasi Firebase Firestore.
-
-## 🚀 Fitur Utama
-
-- **Machine Learning**: K-Means clustering untuk analisis performa karyawan
-- **Firebase Integration**: Sinkronisasi real-time dengan Firestore
-- **RESTful API**: API endpoints yang lengkap untuk manajemen data
-- **Performance Analytics**: Analisis mendalam performa karyawan
-- **AI-powered Insights**: Rekomendasi dan insight berbasis AI
-
-## 📊 Machine Learning Features
-
-### Performance Metrics
-
-- **Total Work Hours**: Total jam kerja dalam periode tertentu
-- **Attendance Rate**: Tingkat kehadiran karyawan
-- **Punctuality Score**: Skor ketepatan waktu masuk kerja
-- **Consistency Score**: Konsistensi jam kerja harian
-- **Productivity Score**: Skor produktivitas berdasarkan deskripsi kerja
-- **Overtime Ratio**: Rasio lembur terhadap jam kerja normal
-
-### Clustering Analysis
-
-- **Algorithm**: K-Means clustering dengan 3 cluster default
-- **Clusters**: High Performer, Average Performer, Needs Improvement
-- **Features**: 7 performance metrics
-- **Model Persistence**: Model disimpan dalam format joblib
-- **Accuracy**: Silhouette score untuk evaluasi model
-
-## 🛠️ Setup dan Instalasi
-
-### 1. Clone Repository
-
-```bash
-git clone <repository-url>
-cd employee-performance-backend
-```
-
-### 2. Setup Virtual Environment
-
-```bash
-python -m venv venv
-
-# Windows
-venv\Scripts\activate
-
-# Linux/macOS
-source venv/bin/activate
-```
-
-### 3. Install Dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-### 4. Setup Firebase
-
-1. Buat project di [Firebase Console](https://console.firebase.google.com/)
-2. Enable Firestore Database
-3. Generate service account key:
-   - Go to Project Settings > Service Accounts
-   - Generate new private key
-   - Download JSON file
-4. Place the JSON file di `config/firebase-credentials.json`
-5. Run setup helper:
-
-```bash
-python setup_firebase.py
-```
-
-### 5. Configure Environment
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env` file dengan konfigurasi yang sesuai:
-
-```env
-FIREBASE_CREDENTIALS_PATH=config/firebase-credentials.json
-FIREBASE_PROJECT_ID=your-project-id
-API_HOST=0.0.0.0
-API_PORT=8000
-DEBUG=True
-ALLOWED_ORIGINS=http://localhost:3000
-ML_MODEL_PATH=models
-CLUSTERING_N_CLUSTERS=3
-```
-
-### 6. Run Application
-
-```bash
-python run_server.py
-```
-
-atau
-
-```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-## 📚 API Documentation
-
-Setelah menjalankan aplikasi, akses dokumentasi API di:
-
-- **Swagger UI**: `http://localhost:8000/docs`
-- **ReDoc**: `http://localhost:8000/redoc`
-
-## 🔗 API Endpoints
-
-### Users Management
-
-- `GET /api/v1/users/` - Get all users
-- `GET /api/v1/users/{user_id}` - Get user by ID
-- `GET /api/v1/users/workers/active` - Get active workers
-- `GET /api/v1/users/worker/{worker_id}` - Get user by worker ID
-
-### Attendance Management
-
-- `GET /api/v1/attendance/` - Get attendance records
-- `GET /api/v1/attendance/{attendance_id}` - Get specific attendance
-- `GET /api/v1/attendance/user/{user_id}/summary` - Get user attendance summary
-
-### Analytics
-
-- `GET /api/v1/analytics/overview` - Get analytics overview
-  - **Parameters**:
-    - `date_from` (optional): Start date filter (format: YYYY-MM-DD)
-    - `date_to` (optional): End date filter (format: YYYY-MM-DD)
-- `GET /api/v1/analytics/team/performance` - Get team performance
-  - **Parameters**:
-    - `date_from` (optional): Start date filter (format: YYYY-MM-DD)
-    - `date_to` (optional): End date filter (format: YYYY-MM-DD)
-    - `role` (optional): User role filter (default: "worker")
-- `GET /api/v1/analytics/productivity/ranking` - Get productivity ranking
-  - **Parameters**:
-    - `date_from` (optional): Start date filter (format: YYYY-MM-DD)
-    - `date_to` (optional): End date filter (format: YYYY-MM-DD)
-    - `limit` (optional): Number of results (default: 10)
-- `GET /api/v1/analytics/trends/daily` - Get daily trends
-  - **Parameters**:
-    - `date_from` (optional): Start date filter (format: YYYY-MM-DD)
-    - `date_to` (optional): End date filter (format: YYYY-MM-DD)
-
-### Machine Learning
-
-- `POST /api/v1/ml/clustering/analyze` - Perform clustering analysis
-- `GET /api/v1/ml/clustering/quick-analysis` - Quick clustering analysis
-- `GET /api/v1/ml/clustering/monthly-analysis` - Monthly clustering analysis
-  - **Parameters**:
-    - `year` (optional): Year (default: current year)
-    - `month` (optional): Month 1-12 (default: current month)
-    - `n_clusters` (optional): Number of clusters (default: 3)
-- `GET /api/v1/ml/clustering/quarterly-analysis` - Quarterly clustering analysis
-  - **Parameters**:
-    - `year` (optional): Year (default: current year)
-    - `quarter` (optional): Quarter 1-4 (default: current quarter)
-    - `n_clusters` (optional): Number of clusters (default: 3)
-- `GET /api/v1/ml/clustering/yearly-analysis` - Yearly clustering analysis
-  - **Parameters**:
-    - `year` (optional): Year (default: current year)
-    - `n_clusters` (optional): Number of clusters (default: 3)
-- `GET /api/v1/ml/clustering/user/{user_id}/predict` - Predict user cluster
-- `GET /api/v1/ml/performance/{user_id}/metrics` - Get performance metrics
-- `GET /api/v1/ml/performance/{user_id}/insights` - Get AI insights
-- `POST /api/v1/ml/clustering/batch-predict` - Batch predict clusters
-
-## 🗄️ Database Schema
-
-### Users Collection (Firebase Firestore)
-
-```json
-{
-  "id": "string",
-  "email": "string",
-  "name": "string",
-  "role": "worker|manager|admin",
-  "status": "active|inactive|suspended",
-  "profileImageUrl": "string",
-  "workerId": "string",
-  "created": "ISO datetime"
-}
-```
-
-### Attendance Collection (Firebase Firestore)
-
-```json
-{
-  "id": "string",
-  "attendanceId": "string",
-  "userId": "string",
-  "projectId": "string",
-  "date": "YYYY-MM-DD",
-  "clockInTime": "HH:MM",
-  "clockOutTime": "HH:MM",
-  "totalHoursFormatted": "H:MM",
-  "totalMinutes": 0,
-  "workHoursFormatted": "H:MM",
-  "workMinutes": 0,
-  "overtimeHoursFormatted": "H:MM",
-  "overtimeMinutes": 0,
-  "workDescription": "string",
-  "workProofIn": "url",
-  "workProofOut": "url",
-  "status": "approved|pending|rejected"
-}
-```
-
-## 🤖 Machine Learning Usage
-
-### Quick Start Clustering Analysis
-
-```python
-# GET /api/v1/ml/clustering/quick-analysis
-# Response will include:
-{
-  "results": [...],
-  "cluster_centers": {...},
-  "feature_names": [...],
-  "total_users": 10,
-  "model_accuracy": 0.85
-}
-```
-
-### Get User Performance Insights
-
-```python
-# GET /api/v1/ml/performance/{user_id}/insights
-# Response:
-{
-  "user_id": "user123",
-  "insights": ["Good attendance with room for improvement"],
-  "recommendations": ["Focus on improving daily attendance consistency"],
-  "strengths": ["Very punctual", "High productivity"],
-  "areas_for_improvement": ["Work schedule consistency"]
-}
-```
-
-## 🔧 Konfigurasi Lanjutan
-
-### Environment Variables Detail
-
-- `FIREBASE_CREDENTIALS_PATH`: Path ke service account JSON
-- `FIREBASE_PROJECT_ID`: ID project Firebase
-- `CLUSTERING_N_CLUSTERS`: Jumlah cluster untuk K-Means (default: 3)
-- `ML_MODEL_PATH`: Directory untuk menyimpan trained models
-- `WORKING_HOURS_TARGET`: Target jam kerja per hari (default: 8)
-- `PUNCTUALITY_TIME_THRESHOLD`: Batas waktu untuk punctuality (default: 09:00)
-
-### Model Training
-
-Model akan otomatis di-train saat pertama kali menjalankan clustering analysis. Model akan disimpan di directory `models/` dan dapat digunakan untuk prediksi selanjutnya.
-
-## 📈 Monitoring dan Testing
-
-### Health Check
-
-```bash
-curl http://localhost:8000/health
-```
-
-### Test API Endpoints
-
-```bash
-# Get all active workers
-curl http://localhost:8000/api/v1/users/workers/active
-
-# Get analytics overview
-curl http://localhost:8000/api/v1/analytics/overview
-
-# Perform quick clustering
-curl http://localhost:8000/api/v1/ml/clustering/quick-analysis
-```
-
-## 🔐 Security & Best Practices
-
-1. **Firebase Credentials**: Jangan commit file credentials ke repository
-2. **Environment Variables**: Gunakan `.env` file untuk konfigurasi sensitif
-3. **CORS**: Set ALLOWED_ORIGINS sesuai domain frontend yang diizinkan
-4. **API Keys**: Simpan semua API keys di environment variables
-
-## 📝 Development
-
-### Adding New Features
-
-1. Create new models in `app/models/`
-2. Add business logic in `app/services/`
-3. Create API endpoints in `app/api/routes/`
-4. Update documentation
-
-### Running Tests
-
-```bash
-# Install test dependencies
-pip install pytest pytest-asyncio httpx
-
-# Run tests
-pytest
-```
-
-## 🆘 Troubleshooting
-
-### Common Issues
-
-1. **Firebase Connection Error**
-
-   - Check if `config/firebase-credentials.json` exists
-   - Verify FIREBASE_PROJECT_ID in .env
-   - Ensure Firestore is enabled in Firebase Console
-
-2. **Import Errors**
-
-   - Run `pip install -r requirements.txt`
-   - Check if virtual environment is activated
-
-3. **Model Training Fails**
-   - Ensure sufficient data in Firebase
-   - Check if users have attendance records
-   - Verify date range parameters
-
-### Support
-
-Untuk pertanyaan atau issues:
-
-1. Check dokumentasi API di `/docs`
-2. Review error logs
-3. Verify Firebase setup dengan `python setup_firebase.py`
-
----
-
-**Note**: Pastikan untuk setup Firebase Firestore dengan benar dan menambahkan service account credentials sebelum menjalankan aplikasi.
-
 run_server.py:
 """
 Script untuk menjalankan server dengan konfigurasi yang tepat
@@ -2353,4 +1949,3 @@ def update_env_file(project_id):
 
 if __name__ == "__main__":
     setup_firebase()
-

@@ -4,6 +4,8 @@ from google.cloud.firestore_v1 import FieldFilter
 from typing import List, Dict, Optional, Any
 import json
 import os
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 from app.core.config import settings
 
@@ -11,6 +13,7 @@ class FirebaseService:
     def __init__(self):
         self.db = None
         self.app = None
+        self.executor = ThreadPoolExecutor(max_workers=4)
 
     def initialize(self):
         """Initialize Firebase Admin SDK"""
@@ -42,75 +45,53 @@ class FirebaseService:
             print("2. Set FIREBASE_PROJECT_ID in .env file")
             raise
 
+    def _convert_firebase_data(self, doc_data: Dict) -> Dict:
+        """Convert Firebase datetime objects to strings"""
+        for key, value in doc_data.items():
+            if hasattr(value, 'isoformat'):
+                doc_data[key] = value.isoformat()
+            elif hasattr(value, 'strftime'):
+                doc_data[key] = value.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+            elif value is None:
+                doc_data[key] = None
+        return doc_data
+
     async def get_collection(self, collection_name: str) -> List[Dict]:
         """Get all documents from a collection"""
-        try:
-            docs = self.db.collection(collection_name).stream()
-            result = []
-            for doc in docs:
-                doc_data = doc.to_dict()
-                doc_data['id'] = doc.id
-                
-                # Convert Firebase datetime objects to strings
-                for key, value in doc_data.items():
-                    if hasattr(value, 'isoformat'):
-                        doc_data[key] = value.isoformat()
-                    elif hasattr(value, 'strftime'):
-                        doc_data[key] = value.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
-                
-                result.append(doc_data)
-            return result
-        except Exception as e:
-            print(f"Error getting collection {collection_name}: {e}")
-            return []
+        def _get_collection_sync():
+            try:
+                docs = self.db.collection(collection_name).stream()
+                result = []
+                for doc in docs:
+                    doc_data = doc.to_dict()
+                    doc_data['id'] = doc.id
+                    doc_data = self._convert_firebase_data(doc_data)
+                    result.append(doc_data)
+                return result
+            except Exception as e:
+                print(f"Error getting collection {collection_name}: {e}")
+                return []
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(self.executor, _get_collection_sync)
 
     async def get_document(self, collection_name: str, doc_id: str) -> Optional[Dict]:
         """Get a specific document"""
-        try:
-            doc = self.db.collection(collection_name).document(doc_id).get()
-            if doc.exists:
-                doc_data = doc.to_dict()
-                doc_data['id'] = doc.id
-                
-                # Convert Firebase datetime objects to strings
-                for key, value in doc_data.items():
-                    if hasattr(value, 'isoformat'):
-                        doc_data[key] = value.isoformat()
-                    elif hasattr(value, 'strftime'):
-                        doc_data[key] = value.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
-                
-                return doc_data
-            return None
-        except Exception as e:
-            print(f"Error getting document {doc_id}: {e}")
-            return None
+        def _get_document_sync():
+            try:
+                doc = self.db.collection(collection_name).document(doc_id).get()
+                if doc.exists:
+                    doc_data = doc.to_dict()
+                    doc_data['id'] = doc.id
+                    doc_data = self._convert_firebase_data(doc_data)
+                    return doc_data
+                return None
+            except Exception as e:
+                print(f"Error getting document {doc_id}: {e}")
+                return None
 
-    async def add_document(self, collection_name: str, data: Dict) -> str:
-        """Add a new document"""
-        try:
-            doc_ref = self.db.collection(collection_name).add(data)
-            return doc_ref[1].id
-        except Exception as e:
-            print(f"Error adding document: {e}")
-            raise
-
-    async def update_document(self, collection_name: str, doc_id: str, data: Dict) -> bool:
-        """Update a document"""
-        try:
-            self.db.collection(collection_name).document(doc_id).update(data)
-            return True
-        except Exception as e:
-            print(f"Error updating document {doc_id}: {e}")
-            return False
-
-    async def delete_document(self, collection_name: str, doc_id: str) -> bool:
-        """Delete a document"""
-        try:
-            self.db.collection(collection_name).document(doc_id).delete()
-            return True
-        except Exception as e:
-            print(f"Error deleting document {doc_id}: {e}")
-            return False
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(self.executor, _get_document_sync)
 
     async def query_collection(
         self, 
@@ -120,38 +101,35 @@ class FirebaseService:
         limit: int = None
     ) -> List[Dict]:
         """Query collection with filters"""
-        try:
-            query = self.db.collection(collection_name)
-            
-            if filters:
-                for field, operator, value in filters:
-                    query = query.where(filter=FieldFilter(field, operator, value))
-            
-            if order_by:
-                query = query.order_by(order_by)
-            
-            if limit:
-                query = query.limit(limit)
-            
-            docs = query.stream()
-            result = []
-            for doc in docs:
-                doc_data = doc.to_dict()
-                doc_data['id'] = doc.id
+        def _query_collection_sync():
+            try:
+                query = self.db.collection(collection_name)
                 
-                # Convert Firebase datetime objects to strings
-                for key, value in doc_data.items():
-                    if hasattr(value, 'isoformat'):
-                        doc_data[key] = value.isoformat()
-                    elif hasattr(value, 'strftime'):
-                        doc_data[key] = value.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+                if filters:
+                    for field, operator, value in filters:
+                        query = query.where(filter=FieldFilter(field, operator, value))
                 
-                result.append(doc_data)
-            
-            return result
-        except Exception as e:
-            print(f"Error querying collection {collection_name}: {e}")
-            return []
+                if order_by:
+                    query = query.order_by(order_by)
+                
+                if limit:
+                    query = query.limit(limit)
+                
+                docs = query.stream()
+                result = []
+                for doc in docs:
+                    doc_data = doc.to_dict()
+                    doc_data['id'] = doc.id
+                    doc_data = self._convert_firebase_data(doc_data)
+                    result.append(doc_data)
+                
+                return result
+            except Exception as e:
+                print(f"Error querying collection {collection_name}: {e}")
+                return []
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(self.executor, _query_collection_sync)
 
     async def get_attendance_by_user(self, user_id: str, date_from: str = None, date_to: str = None) -> List[Dict]:
         """Get attendance records for a specific user"""

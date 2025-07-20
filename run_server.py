@@ -26,10 +26,10 @@ def check_firebase_setup():
     """Check if Firebase is properly configured"""
     if not os.path.exists("config/firebase-credentials.json"):
         print("❌ Firebase credentials not found!")
-        print("Please run: python setup_firebase.py")
+        print("Please add your Firebase service account key to config/firebase-credentials.json")
         return False
     
-    if not settings.FIREBASE_PROJECT_ID or settings.FIREBASE_PROJECT_ID == "your-project-id":
+    if not settings.FIREBASE_PROJECT_ID or settings.FIREBASE_PROJECT_ID == "your-firebase-project-id":
         print("❌ Firebase project ID not configured!")
         print("Please update FIREBASE_PROJECT_ID in .env file")
         return False
@@ -44,10 +44,11 @@ def main():
     # Create necessary directories
     os.makedirs("models", exist_ok=True)
     os.makedirs("logs", exist_ok=True)
+    os.makedirs("config", exist_ok=True)
     
     # Check requirements
     if not check_requirements():
-        sys.exit(1)
+        print("⚠️ Some packages are missing, but server will start anyway.")
     
     # Check Firebase setup
     if not check_firebase_setup():
@@ -71,14 +72,18 @@ def main():
     
     print(f"\n🔥 Starting server...")
     
-    uvicorn.run(
-        "app.main:app",
-        host=settings.API_HOST,
-        port=settings.API_PORT,
-        reload=settings.DEBUG,
-        log_level="info",
-        access_log=True
-    )
+    try:
+        uvicorn.run(
+            "app.main:app",
+            host=settings.API_HOST,
+            port=settings.API_PORT,
+            reload=settings.DEBUG,
+            log_level="info",
+            access_log=True
+        )
+    except Exception as e:
+        print(f"❌ Error starting server: {e}")
+        print("Make sure all dependencies are installed and Firebase is configured properly.")
 
 if __name__ == "__main__":
     main()

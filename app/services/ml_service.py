@@ -6,10 +6,13 @@ from sklearn.metrics import silhouette_score
 from datetime import datetime, timedelta
 import joblib
 import os
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend
 import matplotlib.pyplot as plt
 import seaborn as sns
 from typing import List, Dict, Tuple, Optional
 import logging
+import asyncio
 
 from app.services.firebase_service import firebase_service
 from app.models.ml_models import PerformanceMetrics, ClusteringResult, ClusteringResponse, PerformanceInsights
@@ -37,6 +40,7 @@ class MLService:
             1: "Average Performer", 
             2: "High Performer"
         }
+        self.model_metadata = {}
 
     async def initialize(self):
         """Initialize ML service and load saved models if available"""
@@ -89,7 +93,7 @@ class MLService:
             self.display_clustering_results(result)
             
             # Create visualizations
-            self.create_visualizations(result)
+            await self.create_visualizations_async(result)
             
         except Exception as e:
             print(f"⚠️ Could not run startup analysis: {e}")
@@ -128,7 +132,7 @@ class MLService:
         except Exception as e:
             print(f"⚠️ Could not run monthly analysis: {e}")
             return None
-    
+
     async def run_quarterly_analysis(self, year: int = None, quarter: int = None):
         """Run clustering analysis for specific quarter"""
         from datetime import datetime
@@ -211,6 +215,11 @@ class MLService:
         
         print("\n" + "="*60)
     
+    async def create_visualizations_async(self, result: ClusteringResponse):
+        """Create visualizations asynchronously"""
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, self.create_visualizations, result)
+
     def create_visualizations(self, result: ClusteringResponse):
         """Create and save visualizations"""
         try:
@@ -308,6 +317,14 @@ class MLService:
             
             joblib.dump(self.scaler, scaler_path)
             joblib.dump(self.kmeans_model, kmeans_path)
+            
+            # Update metadata
+            self.model_metadata = {
+                'last_trained': datetime.now().isoformat(),
+                'training_data_size': len(self.feature_names),
+                'n_clusters': len(self.cluster_labels)
+            }
+            
             print("✅ Models saved successfully")
         except Exception as e:
             print(f"❌ Error saving models: {e}")
@@ -595,8 +612,8 @@ class MLService:
             cluster_centers=cluster_centers,
             feature_names=feature_columns,
             analysis_period={
-                "date_from": date_from or "N/A",
-                "date_to": date_to or "N/A"
+                "date_from": date_from or "All Time",
+                "date_to": date_to or "All Time"
             },
             total_users=len(users),
             model_accuracy=silhouette_avg
@@ -624,94 +641,6 @@ class MLService:
                 total_weight += weights[feature]
         
         return total_score / total_weight if total_weight > 0 else 0
-
-    async def predict_user_cluster(self, user_id: str) -> Dict:
-        """Predict cluster for a single user using trained model"""
-        if not self.kmeans_model:
-            raise ValueError("Model not trained yet. Run clustering analysis first.")
-        
-        # Calculate user metrics
-        metrics = await self.calculate_performance_metrics(user_id)
-        
-        # Prepare features
-        feature_values = [getattr(metrics, feature) for feature in self.feature_names]
-        X = np.array([feature_values])
-        
-        # Scale and predict
-        X_scaled = self.scaler.transform(X)
-        cluster = self.kmeans_model.predict(X_scaled)[0]
-        
-        # Get user info
-        user = await firebase_service.get_document("users", user_id)
-        
-        performance_score = self._calculate_overall_score(
-            {feature: value for feature, value in zip(self.feature_names, feature_values)}
-        )
-        
-        return {
-            "user_id": user_id,
-            "name": user.get('name', '') if user else '',
-            "cluster": int(cluster),
-            "cluster_label": self.cluster_labels.get(cluster, f"Cluster {cluster}"),
-            "performance_score": performance_score,
-            "features": {feature: value for feature, value in zip(self.feature_names, feature_values)}
-        }
-
-    async def generate_performance_insights(self, user_id: str) -> PerformanceInsights:
-        """Generate AI-powered insights and recommendations for user performance"""
-        metrics = await self.calculate_performance_metrics(user_id)
-        
-        insights = []
-        recommendations = []
-        strengths = []
-        areas_for_improvement = []
-        
-        # Analyze attendance rate
-        if metrics.attendance_rate >= 95:
-            strengths.append("Excellent attendance record")
-        elif metrics.attendance_rate >= 85:
-            insights.append("Good attendance with room for improvement")
-        else:
-            areas_for_improvement.append("Attendance consistency")
-            recommendations.append("Focus on improving daily attendance consistency")
-        
-        # Analyze punctuality
-        if metrics.punctuality_score >= 90:
-            strengths.append("Very punctual")
-        elif metrics.punctuality_score >= 70:
-            insights.append("Generally punctual with occasional delays")
-        else:
-            areas_for_improvement.append("Punctuality")
-            recommendations.append("Work on arriving on time consistently")
-        
-        # Analyze productivity
-        if metrics.productivity_score >= 85:
-            strengths.append("High productivity and quality work descriptions")
-        elif metrics.productivity_score >= 70:
-            insights.append("Good productivity with potential for enhancement")
-        else:
-            areas_for_improvement.append("Work productivity and documentation")
-            recommendations.append("Improve work documentation and task completion quality")
-        
-        # Analyze consistency
-        if metrics.consistency_score >= 85:
-            strengths.append("Consistent work patterns")
-        else:
-            areas_for_improvement.append("Work schedule consistency")
-            recommendations.append("Maintain more consistent daily work hours")
-        
-        # Overtime analysis
-        if metrics.overtime_ratio > 20:
-            insights.append("High overtime ratio may indicate workload imbalance")
-            recommendations.append("Review task distribution and time management")
-        
-        return PerformanceInsights(
-            user_id=user_id,
-            insights=insights,
-            recommendations=recommendations,
-            strengths=strengths,
-            areas_for_improvement=areas_for_improvement
-        )
 
 # Global instance
 ml_service = MLService()
